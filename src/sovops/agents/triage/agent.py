@@ -147,6 +147,29 @@ class TriageAgent:
             )
             return
 
+        if diagnosis.failure_mode is FailureMode.UNKNOWN:
+            # Nothing to delegate: there is no diagnosis to act on. An
+            # incident that neither the rules nor the model can classify is
+            # exactly the one that needs a human, so it pauses in a state a
+            # caller can see rather than closing as if it had been handled.
+            task.status = TaskStatus(
+                TaskState.INPUT_REQUIRED,
+                message=_agent_message(
+                    {
+                        "diagnosis": str(diagnosis.failure_mode),
+                        "source": str(diagnosis.source),
+                        "evidence": diagnosis.evidence,
+                        "delegated": False,
+                        "awaiting": "human_diagnosis",
+                        "reason": (
+                            "no rule settled this incident and the model could not "
+                            "classify it; remediation is not attempted without a diagnosis"
+                        ),
+                    }
+                ),
+            )
+            return
+
         if self._remediation is None:
             task.status = TaskStatus(
                 TaskState.COMPLETED,
@@ -166,7 +189,7 @@ class TriageAgent:
             {
                 "failure_mode": str(diagnosis.failure_mode),
                 "service": service,
-                "signals": signals,
+                "signals": _forwarded_signals(signals),
                 "episode_id": payload.get("episode_id") or task.id,
             }
         )
@@ -269,6 +292,38 @@ class TriageAgent:
                 Source.MODEL,
                 [*ruled.evidence, f"model unavailable: {exc}"],
             )
+
+
+# What crosses the A2A boundary. An allowlist, not a denylist: a signal
+# field added to a tool tomorrow must be named here to reach the agent
+# holding the write credential, rather than arriving there by default.
+FORWARDED_SIGNALS = (
+    "memory_limit_bytes",
+    "memory_percent",
+    "cpu_percent",
+    "disk_percent",
+    "restart_count",
+    "p99_latency_ms",
+    "exit_code",
+    "oom_killed",
+    "config_changed_recently",
+)
+
+
+def _forwarded_signals(signals: dict[str, Any]) -> dict[str, Any]:
+    """Project the signals down to what the remediation agent uses.
+
+    Log content is the primary untrusted input in this system and the
+    remediation agent reads exactly one field out of `signals`
+    (`memory_limit_bytes`, to size a memory increase). Forwarding the raw
+    blob copied attacker-controlled text into the prompt of the only agent
+    holding a write credential, for no functional benefit.
+
+    Least privilege applies to data, not only to rights: a component gets
+    what it uses, and the boundary that changes the credential is the
+    right place to enforce it.
+    """
+    return {k: signals[k] for k in FORWARDED_SIGNALS if k in signals}
 
 
 def _safe_signals(signals: dict[str, Any]) -> dict[str, Any]:

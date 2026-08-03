@@ -136,6 +136,31 @@ better, not poorer** — and `rule_settled_rate` is reported separately in
 every eval run precisely so a future prompt change cannot quietly move
 work back onto the model and call it an improvement.
 
+### Two defects the happy path did not show
+
+Both were found by asking what happens *outside* the eight scenarios, and
+both are the kind that a suite written from the design never catches
+because it asserts the design.
+
+**An unclassifiable incident used to close as `COMPLETED`.** When neither
+the rules nor the model can settle a case, triage returns `UNKNOWN` — and
+the downstream branch treated "no diagnosis" as "nothing to remediate",
+retiring the task with no action, no audit row, and nobody told. The one
+incident that most needs a human was the only one that reached none. It
+now pauses in `TASK_STATE_INPUT_REQUIRED`, at both agents: triage refuses
+to delegate without a diagnosis, and remediation refuses to close on one
+it never received. *A system that degrades toward silence has not degraded
+safely.*
+
+**Log content used to cross the privilege boundary.** Triage caps the log
+blob before its own prompt, then forwarded the *raw* signals to
+remediation — copying attacker-controlled text into the prompt of the only
+agent holding a write credential, for no functional benefit: remediation
+reads exactly one field out of `signals`. Delegation now projects through
+`FORWARDED_SIGNALS`, an allowlist, so a signal added tomorrow must be
+named to cross. *Least privilege is a property of data, not only of
+rights.*
+
 ---
 
 ## Evaluation
@@ -255,7 +280,7 @@ Stated because a POC that hides them is worse than one that does not.
 docker compose up -d                        # inference, Jaeger, target estate
 docker exec sovops-ollama ollama pull qwen3:1.7b
 uv sync --extra dev
-uv run pytest -q                            # 33 tests
+uv run pytest -q                            # 46 tests
 uv run python -m sovops.evals.runner        # the eval suite
 ```
 

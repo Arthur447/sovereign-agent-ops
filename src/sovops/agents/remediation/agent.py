@@ -255,11 +255,31 @@ class RemediationAgent:
         signals = payload.get("signals", {})
         episode_id = payload.get("episode_id") or task.id
 
-        if failure_mode in (FailureMode.HEALTHY, FailureMode.UNKNOWN):
+        if failure_mode == FailureMode.HEALTHY:
             task.status = TaskStatus(
                 TaskState.COMPLETED,
                 message=_agent_message(
-                    {"action": "none", "reason": f"nothing to remediate for {failure_mode!r}"}
+                    {"action": "none", "reason": "service is healthy, nothing to remediate"}
+                ),
+            )
+            return
+
+        if failure_mode == FailureMode.UNKNOWN:
+            # Defence in depth: triage already refuses to delegate an
+            # unclassified incident, but this agent must not treat "no
+            # diagnosis" as "nothing wrong" whatever its caller does.
+            # Closing here would retire an open incident nobody looked at.
+            task.status = TaskStatus(
+                TaskState.INPUT_REQUIRED,
+                message=_agent_message(
+                    {
+                        "action": "none",
+                        "awaiting": "human_diagnosis",
+                        "reason": (
+                            "delegated without a diagnosis; no candidate action can "
+                            "be derived from an unclassified incident"
+                        ),
+                    }
                 ),
             )
             return
