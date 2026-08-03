@@ -38,6 +38,7 @@ in the audit ledger. Naming it as an extension rather than pretending
 A2A provides it is the honest framing: the protocol does not solve
 delegation, and anyone who says it does has not read section 8.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -98,7 +99,13 @@ class Part:
 
     @classmethod
     def from_wire(cls, payload: dict[str, Any]) -> Part:
-        return cls(**{k: v for k, v in payload.items() if k in {"text", "raw", "url", "data", "metadata"}})
+        return cls(
+            **{
+                k: v
+                for k, v in payload.items()
+                if k in {"text", "raw", "url", "data", "metadata"}
+            }
+        )
 
 
 @dataclass(frozen=True)

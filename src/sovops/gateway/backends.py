@@ -16,6 +16,7 @@ Both return `(text, input_tokens, output_tokens)` and nothing else.
 Cost, latency and posture are the gateway's business, so a backend
 cannot disagree with another about how they are computed.
 """
+
 from __future__ import annotations
 
 import json
@@ -95,7 +96,9 @@ class OpenAICompatBackend:
             raise BackendError(f"inference endpoint unreachable: {exc}") from exc
 
         if resp.status_code >= 400:
-            raise BackendError(f"inference endpoint returned {resp.status_code}: {resp.text[:400]}")
+            raise BackendError(
+                f"inference endpoint returned {resp.status_code}: {resp.text[:400]}"
+            )
 
         body = resp.json()
         text = body["choices"][0]["message"]["content"] or ""
@@ -167,7 +170,9 @@ class AnthropicBackend:
 
         body = resp.json()
         text = "".join(
-            block.get("text", "") for block in body.get("content", []) if block.get("type") == "text"
+            block.get("text", "")
+            for block in body.get("content", [])
+            if block.get("type") == "text"
         )
         usage = body.get("usage") or {}
         return (

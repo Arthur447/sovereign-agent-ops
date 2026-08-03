@@ -27,6 +27,7 @@ waiting to be discovered in a log six months later. `EscalationDenied`
 is raised rather than degraded — refusing is the safe failure, and the
 caller has to decide what to do about it in the open.
 """
+
 from __future__ import annotations
 
 import time
@@ -69,8 +70,7 @@ class ModelSpec:
 
     def cost_eur(self, input_tokens: int, output_tokens: int) -> float:
         return (
-            input_tokens * self.eur_per_mtok_in
-            + output_tokens * self.eur_per_mtok_out
+            input_tokens * self.eur_per_mtok_in + output_tokens * self.eur_per_mtok_out
         ) / 1_000_000
 
 

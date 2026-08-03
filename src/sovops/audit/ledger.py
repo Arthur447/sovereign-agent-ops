@@ -27,6 +27,7 @@ volume", which is the question after an incident. The ruling is written
 *before* the tool call, and the outcome patched onto it after, so an
 action that crashed mid-flight is still visible as attempted.
 """
+
 from __future__ import annotations
 
 import hashlib

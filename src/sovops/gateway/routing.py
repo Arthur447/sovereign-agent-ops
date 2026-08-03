@@ -4,6 +4,7 @@ Separate from `base.py` so the policy object stays constructible in
 tests without a file on disk, and so the YAML shape can change without
 touching the enforcement logic.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

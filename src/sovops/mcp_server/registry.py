@@ -23,6 +23,7 @@ part of the same diff. The alternative — a central policy file mapping
 tool names to risk levels — drifts the first time a tool changes what it
 does without changing its name, and nothing detects the drift.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

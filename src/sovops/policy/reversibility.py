@@ -48,6 +48,7 @@ when a human answers. The regulatory constraint ("validation beyond the
 reversible perimeter") thus lives in the task state machine rather than
 in a convention someone has to remember.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -197,7 +198,10 @@ class ReversibilityGate:
 
         # Data is categorical. No threshold authorises destroying it, and
         # no accumulation of prior good behaviour earns the right.
-        if risk.blast.scope is Scope.DATA and risk.reversibility is not Reversibility.REVERSIBLE:
+        if (
+            risk.blast.scope is Scope.DATA
+            and risk.reversibility is not Reversibility.REVERSIBLE
+        ):
             return Ruling(
                 decision=Decision.REQUIRE_HUMAN,
                 reason=(
@@ -210,7 +214,10 @@ class ReversibilityGate:
         if risk.reversibility is Reversibility.IRREVERSIBLE:
             return Ruling(
                 decision=Decision.REQUIRE_HUMAN,
-                reason=f"{tool} is irreversible (scope={risk.blast.scope}, n={risk.blast.n_targets})",
+                reason=(
+                    f"{tool} is irreversible "
+                    f"(scope={risk.blast.scope}, n={risk.blast.n_targets})"
+                ),
                 budget_after=budget.spent,
             )
 

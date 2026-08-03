@@ -3,6 +3,7 @@
 These are the rules an auditor would ask about, written so that changing
 one is a visible diff rather than a quiet regression.
 """
+
 from __future__ import annotations
 
 import pytest

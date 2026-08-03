@@ -26,6 +26,7 @@ human. The task picks up where the gate stopped it. This is the whole
 HITL mechanism: no side channel, no separate approval service — a paused
 task and a second message on the same id.
 """
+
 from __future__ import annotations
 
 import logging
@@ -36,8 +37,8 @@ from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 
 from sovops.a2a.types import (
+    A2A_VERSION,
     AGENT_CARD_PATH,
-    ERR_INTERNAL,
     ERR_INVALID_PARAMS,
     ERR_INVALID_REQUEST,
     ERR_METHOD_NOT_FOUND,
@@ -48,7 +49,6 @@ from sovops.a2a.types import (
     METHOD_TASKS_CANCEL,
     METHOD_TASKS_GET,
     METHOD_TASKS_LIST,
-    A2A_VERSION,
     ActorContext,
     AgentCard,
     Message,
@@ -142,7 +142,9 @@ def build_a2a_app(
             return _rpc_error(None, ERR_PARSE, "malformed JSON body")
 
         if payload.get("jsonrpc") != "2.0" or "method" not in payload:
-            return _rpc_error(payload.get("id"), ERR_INVALID_REQUEST, "not a JSON-RPC 2.0 request")
+            return _rpc_error(
+                payload.get("id"), ERR_INVALID_REQUEST, "not a JSON-RPC 2.0 request"
+            )
 
         rpc_id = payload.get("id")
         method = payload["method"]
@@ -199,7 +201,9 @@ async def _handle_send(
             return _rpc_error(rpc_id, ERR_TASK_NOT_FOUND, f"no task {message.taskId!r}")
         if task.is_terminal:
             return _rpc_error(
-                rpc_id, ERR_INVALID_REQUEST, f"task already {task.status.state}, cannot continue"
+                rpc_id,
+                ERR_INVALID_REQUEST,
+                f"task already {task.status.state}, cannot continue",
             )
     else:
         task = tasks.put(Task())

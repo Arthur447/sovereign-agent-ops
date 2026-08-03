@@ -36,6 +36,7 @@ suite can now measure the two paths separately — a rule that fires and a
 model that guesses are different kinds of correct, and averaging them
 would hide which one is carrying the result.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -125,14 +126,18 @@ def classify(signals: dict[str, Any]) -> Diagnosis:
     # 2. Disk pressure is equally definitional and independent of the rest.
     if disk_pct >= DISK_PRESSURE_PERCENT:
         return Diagnosis(
-            FailureMode.DISK_PRESSURE, 1.0, Source.RULE,
+            FailureMode.DISK_PRESSURE,
+            1.0,
+            Source.RULE,
             [f"disk_percent={disk_pct:.1f} >= {DISK_PRESSURE_PERCENT}"],
         )
 
     # 3. Repeated restarts with a non-zero exit and no memory signal.
     if restarts >= CRASH_LOOP_RESTARTS and exit_code not in (0, None):
         return Diagnosis(
-            FailureMode.CRASH_LOOP, 1.0, Source.RULE,
+            FailureMode.CRASH_LOOP,
+            1.0,
+            Source.RULE,
             [f"restart_count={restarts} >= {CRASH_LOOP_RESTARTS}", f"exit_code={exit_code}"],
         )
 
@@ -146,14 +151,18 @@ def classify(signals: dict[str, Any]) -> Diagnosis:
     # 5. Recent config change plus any degradation, with no resource cause.
     if config_changed and (restarts > 0 or p99 >= LATENCY_P99_MS):
         return Diagnosis(
-            FailureMode.CONFIG_DRIFT, 0.9, Source.RULE,
+            FailureMode.CONFIG_DRIFT,
+            0.9,
+            Source.RULE,
             ["config_changed_recently=true", f"restart_count={restarts}"],
         )
 
     # 6. Everything nominal.
     if restarts == 0 and p99 < LATENCY_P99_MS and mem_pct < 80 and disk_pct < 80:
         return Diagnosis(
-            FailureMode.HEALTHY, 1.0, Source.RULE,
+            FailureMode.HEALTHY,
+            1.0,
+            Source.RULE,
             ["no threshold breached"],
         )
 
@@ -161,7 +170,9 @@ def classify(signals: dict[str, Any]) -> Diagnosis:
     #    only case worth a model call, and it is the case a model is
     #    actually better at than a threshold.
     return Diagnosis(
-        FailureMode.UNKNOWN, 0.0, Source.RULE,
+        FailureMode.UNKNOWN,
+        0.0,
+        Source.RULE,
         [
             f"restart_count={restarts}",
             f"memory_percent={mem_pct:.1f}",
