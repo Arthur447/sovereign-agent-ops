@@ -258,6 +258,16 @@ Stated because a POC that hides them is worse than one that does not.
   not a verifiable delegation, and the downstream agent must trust its
   caller completely. The real fix is a signed delegation token; this is
   the seam where it lands.
+- **The hash chain is tamper-evident, not tamper-proof.** It catches an edited
+  or deleted row — the direct `UPDATE`, the accidental corruption. It does not
+  catch someone who holds write access to the whole ledger and recomputes every
+  subsequent hash, and no local chain can. Closing that needs the evidence
+  moved out of the attacker's reach, in three stackable steps: append-only
+  storage (`UPDATE`/`DELETE` revoked from the application role at the database,
+  not enforced in code); periodic anchoring of the head hash to a system the
+  operator does not control; per-row signatures with a key the application
+  never holds. The chain is the part that makes those cheap — each one only
+  has to protect one hash.
 - **Tasks are in-memory.** A paused task does not survive a restart, so an
   approval arriving after a deploy has nothing to resume. The seam is
   `TaskStore`; the fix is the table the ledger already uses.
