@@ -157,7 +157,7 @@ def test_approval_releases_exactly_the_refused_call():
         volume="pgdata",
         episode_id="inc-1",
         approval_ref=held.approval_ref,
-        approver="arthur",
+        approver="sre-oncall",
     )
     assert approved.status == "ok"
     assert calls == ["drop:pgdata"]
@@ -175,7 +175,7 @@ def test_approval_does_not_authorise_different_arguments():
         volume="production-backups",
         episode_id="inc-1",
         approval_ref=held.approval_ref,
-        approver="arthur",
+        approver="sre-oncall",
     )
     assert swapped.status == "error"
     assert "does not authorise this call" in swapped.reason
@@ -231,7 +231,7 @@ def test_ledger_chain_verifies_after_a_full_episode():
         volume="pgdata",
         episode_id="inc-1",
         approval_ref=held.approval_ref,
-        approver="arthur",
+        approver="sre-oncall",
     )
 
     ok, bad_index = ledger.verify()

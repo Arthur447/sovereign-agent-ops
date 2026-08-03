@@ -191,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
             "volume": "production-backups",
             "episode_id": pending.episode_id,
             "approval_ref": pending.ref,
-            "approver": "arthur",
+            "approver": "sre-oncall",
         },
         trace_id="demo",
         task_id="demo",
@@ -204,7 +204,11 @@ def main(argv: list[str] | None = None) -> int:
     resumed = send(
         remediation_app,
         "http://remediation.demo",
-        {"approval_ref": remote.get("approval_ref"), "approved": True, "approver": "arthur"},
+        {
+            "approval_ref": remote.get("approval_ref"),
+            "approved": True,
+            "approver": "sre-oncall",
+        },
         task_id=info.get("remediation_task"),
     )
     print(f"  remediation task {resumed['id']}")
