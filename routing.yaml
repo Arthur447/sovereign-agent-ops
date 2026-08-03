@@ -1,0 +1,69 @@
+# Model routing — task class → model, sovereign by default.
+#
+# This file answers one question per task class: which weights, running
+# where, may serve this kind of call. It is config and not code because
+# in a regulated deployment the answer changes per customer and per
+# environment, and a per-customer code branch is not a control an auditor
+# can read.
+#
+# `sovereign: true` asserts the weights run on infrastructure we control.
+# It is declared, not inferred: an open-weight model served from someone
+# else's managed endpoint is open-weight and NOT sovereign, and that is
+# precisely the distinction the claim rests on.
+
+models:
+  # The local path. `qwen3:1.7b` is small enough to answer on 8 CPU cores
+  # in seconds. That is not a compromise for triage — classifying an
+  # incident into one of six known failure modes from structured metrics
+  # is a closed-set problem, and the eval suite measures whether that
+  # holds rather than assuming it.
+  qwen3-1.7b:
+    id: "qwen3:1.7b"
+    backend: openai_compat
+    sovereign: true
+    eur_per_mtok_in: 0.0    # self-hosted: marginal token cost is zero,
+    eur_per_mtok_out: 0.0   # the cost is the machine, tracked elsewhere
+    max_output_tokens: 2048
+
+  # A larger local option for plan synthesis, pulled only if the eval
+  # suite shows 1.7b under-reasoning on multi-step remediation.
+  qwen3-4b:
+    id: "qwen3:4b"
+    backend: openai_compat
+    sovereign: true
+    eur_per_mtok_in: 0.0
+    eur_per_mtok_out: 0.0
+    max_output_tokens: 4096
+
+  # The escalation target. Present to make the routing decision real —
+  # a model-agnostic gateway with one backend proves nothing. Reaching it
+  # requires an explicit per-call opt-in carrying a reason, and in a
+  # SecNumCloud deployment this entry would simply be absent.
+  claude-sonnet-5:
+    id: "claude-sonnet-5"
+    backend: anthropic
+    sovereign: false
+    eur_per_mtok_in: 2.80
+    eur_per_mtok_out: 14.00
+    max_output_tokens: 8192
+
+classes:
+  triage:
+    primary: qwen3-1.7b
+    # No escalation target: incident classification runs on sovereign
+    # weights or it does not run. An incident payload carries production
+    # logs and hostnames — the data most likely to be the reason the
+    # sovereignty constraint exists in the first place.
+    escalation: null
+
+  plan:
+    primary: qwen3-1.7b
+    escalation: claude-sonnet-5
+
+  judge:
+    # Eval-time grading. Escalation allowed because grading reads the
+    # agent's own output, not raw production data — a different data
+    # class, so a different rule. Making that reasoning explicit here is
+    # the point: "can this leave" is a data question, not a quality one.
+    primary: qwen3-4b
+    escalation: claude-sonnet-5
