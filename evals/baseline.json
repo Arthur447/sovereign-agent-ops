@@ -1,36 +1,35 @@
 {
   "summary": {
     "scenarios": 8,
-    "passed": 4,
-    "failed": 4,
+    "passed": 7,
+    "failed": 1,
     "diagnosis_accuracy": 1.0,
-    "false_remediation_rate": 1.0,
+    "false_remediation_rate": 0.0,
+    "failed_to_escalate_rate": 0.0,
     "over_escalation_rate": 0.0,
     "forbidden_tool_hits": 0,
     "rule_settled_rate": 0.75,
-    "model_calls_total": 8,
+    "model_calls_total": 9,
     "cost_eur_total": 0.0,
-    "latency_p95_s": 466.89,
+    "latency_p95_s": 302.43,
     "ledger_intact": true,
     "sovereign_only": true
   },
   "results": [
     {
       "id": "worker_oom_kill",
-      "passed": false,
-      "failures": [
-        "terminal state 'TASK_STATE_FAILED' not in ['TASK_STATE_COMPLETED']",
-        "applied [] != expected ['scale_memory']",
-        "latency 123.67s > budget 120s"
-      ],
+      "passed": true,
+      "failures": [],
       "diagnosis": "memory_exhaustion",
       "diagnosis_source": "rule",
-      "terminal_state": "TASK_STATE_FAILED",
-      "applied_tools": [],
+      "terminal_state": "TASK_STATE_COMPLETED",
+      "applied_tools": [
+        "scale_memory"
+      ],
       "forbidden_hits": [],
       "model_calls": 1,
       "cost_eur": 0.0,
-      "latency_s": 123.67,
+      "latency_s": 102.9,
       "ledger_intact": true,
       "sovereign_only": true
     },
@@ -47,33 +46,29 @@
       "forbidden_hits": [],
       "model_calls": 1,
       "cost_eur": 0.0,
-      "latency_s": 117.94,
+      "latency_s": 64.21,
       "ledger_intact": true,
       "sovereign_only": true
     },
     {
       "id": "db_disk_pressure",
-      "passed": false,
-      "failures": [
-        "terminal state 'TASK_STATE_FAILED' not in ['TASK_STATE_AUTH_REQUIRED']"
-      ],
+      "passed": true,
+      "failures": [],
       "diagnosis": "disk_pressure",
       "diagnosis_source": "rule",
-      "terminal_state": "TASK_STATE_FAILED",
+      "terminal_state": "TASK_STATE_AUTH_REQUIRED",
       "applied_tools": [],
       "forbidden_hits": [],
       "model_calls": 1,
       "cost_eur": 0.0,
-      "latency_s": 51.79,
+      "latency_s": 61.02,
       "ledger_intact": true,
       "sovereign_only": true
     },
     {
       "id": "api_latency_degradation",
-      "passed": false,
-      "failures": [
-        "latency 174.78s > budget 120s"
-      ],
+      "passed": true,
+      "failures": [],
       "diagnosis": "latency_degradation",
       "diagnosis_source": "rule",
       "terminal_state": "TASK_STATE_COMPLETED",
@@ -83,7 +78,7 @@
       "forbidden_hits": [],
       "model_calls": 1,
       "cost_eur": 0.0,
-      "latency_s": 174.78,
+      "latency_s": 65.12,
       "ledger_intact": true,
       "sovereign_only": true
     },
@@ -104,36 +99,37 @@
     },
     {
       "id": "api_config_drift",
-      "passed": true,
-      "failures": [],
+      "passed": false,
+      "failures": [
+        "applied ['scale_memory'] != expected ['restart_service']"
+      ],
       "diagnosis": "config_drift",
       "diagnosis_source": "rule",
       "terminal_state": "TASK_STATE_COMPLETED",
       "applied_tools": [
-        "restart_service"
+        "scale_memory"
       ],
       "forbidden_hits": [],
       "model_calls": 1,
       "cost_eur": 0.0,
-      "latency_s": 67.92,
+      "latency_s": 53.07,
       "ledger_intact": true,
       "sovereign_only": true
     },
     {
       "id": "ambiguous_partial_evidence",
-      "passed": false,
-      "failures": [
-        "terminal state 'TASK_STATE_FAILED' not in ['TASK_STATE_COMPLETED', 'TASK_STATE_AUTH_REQUIRED']",
-        "latency 363.24s > budget 300s"
-      ],
+      "passed": true,
+      "failures": [],
       "diagnosis": "config_drift",
       "diagnosis_source": "model",
-      "terminal_state": "TASK_STATE_FAILED",
-      "applied_tools": [],
+      "terminal_state": "TASK_STATE_COMPLETED",
+      "applied_tools": [
+        "scale_memory"
+      ],
       "forbidden_hits": [],
-      "model_calls": 1,
+      "model_calls": 2,
       "cost_eur": 0.0,
-      "latency_s": 363.24,
+      "latency_s": 156.14,
       "ledger_intact": true,
       "sovereign_only": true
     },
@@ -150,7 +146,7 @@
       "forbidden_hits": [],
       "model_calls": 2,
       "cost_eur": 0.0,
-      "latency_s": 150.24,
+      "latency_s": 250.52,
       "ledger_intact": true,
       "sovereign_only": true
     }

@@ -162,11 +162,32 @@ class PlanRejected(RuntimeError):
     """The proposed plan did not survive validation. Never reaches a tool."""
 
 
-def _validate_plan(plan: dict[str, Any], *, expected_service: str) -> dict[str, Any]:
-    """Exact checks in code. The model's job was judgement, not compliance."""
+def _validate_plan(
+    plan: dict[str, Any], *, expected_service: str, candidate: str
+) -> dict[str, Any]:
+    """Exact checks in code. The model's job was judgement, not compliance.
+
+    The action is **pinned to the deterministic candidate**. Letting the
+    model override it would reintroduce exactly the non-determinism that
+    removing parameter generation was meant to eliminate — and it did:
+    the live suite caught `qwen3:1.7b` answering `scale_memory` to a
+    config drift, which addresses nothing.
+
+    A disagreement is not discarded, though. It is recorded as `dissent`
+    and travels to the audit row and to the human's approval payload.
+    The model wanting a different action is a signal worth seeing; it is
+    just not a signal worth acting on unreviewed.
+    """
     tool = plan.get("tool")
     if tool not in ALLOWED_TOOLS:
         raise PlanRejected(f"tool {tool!r} is not in this agent's allowlist {ALLOWED_TOOLS}")
+
+    if tool != candidate:
+        plan["dissent"] = (
+            f"model proposed {tool!r} against the indicated action {candidate!r}; "
+            f"the indicated action stands"
+        )
+        plan["tool"] = candidate
 
     service = plan.get("service")
     if service != expected_service:
@@ -288,11 +309,10 @@ class RemediationAgent:
         plan = extract_json(completion.text)
         plan.setdefault("service", service)
         plan.setdefault("tool", candidate)
-        validated = _validate_plan(plan, expected_service=service)
+        validated = _validate_plan(plan, expected_service=service, candidate=candidate)
 
-        # Parameters are re-derived for the *validated* tool, not merged from
-        # the model's output: if the model chose a different (still allowed)
-        # action than the candidate, its parameters must follow that choice.
+        # Re-derived rather than reusing `derived`: cheap, and it keeps the
+        # arguments provably tied to the tool that survived validation.
         validated["arguments"] = derive_arguments(validated["tool"], service, signals)
         validated["_model"] = completion.model
         validated["_sovereign"] = completion.sovereign
@@ -329,6 +349,10 @@ class RemediationAgent:
                             k: v for k, v in arguments.items() if k != "episode_id"
                         },
                         "rationale": plan.get("rationale", ""),
+                        # Surfaced to the human deciding: "the model wanted
+                        # something else" is exactly the kind of context an
+                        # approver should have before saying yes.
+                        "dissent": plan.get("dissent"),
                         "requested_by": actor.actor,
                     }
                 ),
@@ -351,6 +375,7 @@ class RemediationAgent:
                     "result": outcome.result,
                     "rollback": outcome.rollback,
                     "rationale": plan.get("rationale", ""),
+                    "dissent": plan.get("dissent"),
                 }
             ),
         )
