@@ -327,22 +327,51 @@ def test_the_refusal_is_in_the_ledger_with_its_reason():
     assert ok
 
 
-def test_plan_missing_a_required_argument_never_dispatches():
-    """Found by the demo: a `drop_volume` plan with no volume reached the
-    tool layer and failed there. An unexecutable plan is an invalid plan,
-    and it must fail as one."""
+def test_parameters_are_derived_in_code_not_taken_from_the_model():
+    """The model names the action; the code names the arguments.
+
+    Measured reason: `qwen3:1.7b` copied the prompt's `<service>-data`
+    placeholder into a plan verbatim as a volume name. A garbage name that
+    passes a non-empty check is worse than a rejected plan — it reaches a
+    human for approval looking legitimate.
+    """
+    from sovops.agents.remediation.agent import MANAGED_VOLUMES, derive_arguments
+
+    assert derive_arguments("drop_volume", "target-db", {}) == {
+        "service": "target-db",
+        "volume": MANAGED_VOLUMES["target-db"],
+    }
+    # 512 MiB currently → 1024 MiB, arithmetic, no model involved.
+    assert derive_arguments(
+        "scale_memory", "target-worker", {"memory_limit_bytes": 536870912}
+    ) == {"service": "target-worker", "limit_mb": 1024}
+
+
+def test_no_volume_is_invented_for_an_unregistered_service():
+    """Refusing beats guessing: a plausible name for a volume that may not
+    exist is exactly what a human would approve without noticing."""
+    from sovops.agents.remediation.agent import PlanRejected, derive_arguments
+
+    with pytest.raises(PlanRejected, match="no managed volume registered"):
+        derive_arguments("drop_volume", "target-api", {})
+
+
+def test_plan_without_a_rationale_is_rejected():
+    """The rationale is the only thing the model still produces, and it is
+    what the human reads before authorising. An empty one means the call
+    bought nothing."""
     applied: list[str] = []
     app, _, _, _ = build_stack(
-        plan_responses=[{"tool": "drop_volume", "service": "target-db", "rationale": "x"}],
+        plan_responses=[
+            {"tool": "restart_service", "service": "target-worker", "rationale": ""}
+        ],
         applied=applied,
     )
-    task = post_incident(app, {"service": "target-db", "signals": {"disk_percent": "96%"}})
+    task = post_incident(
+        app, {"service": "target-worker", "signals": {"restart_count": 9, "exit_code": 1}}
+    )
     assert task["status"]["state"] == str(TaskState.FAILED)
     assert applied == []
-    # Triage's own message wraps the peer's — the failure surfaces through
-    # the delegation rather than being flattened into a generic error.
-    surfaced = task["status"]["message"]["parts"][0]["data"]
-    assert "requires ['volume']" in surfaced["detail"]["error"]
 
 
 def test_healthy_service_produces_no_action_and_no_model_call():

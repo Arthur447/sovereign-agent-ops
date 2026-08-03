@@ -80,37 +80,57 @@ CANDIDATE_TOOL: dict[str, str] = {
     FailureMode.DISK_PRESSURE: "drop_volume",
 }
 
-# The union of every allowed tool's arguments. A field missing here is a
-# tool that can be *chosen* but never *parameterised* — the plan travels,
-# the call fails on a missing argument, and the failure surfaces as a
-# broken agent rather than as the schema gap it is. Found exactly that way
-# by the demo: `drop_volume` had no `volume`.
+# The model names the action and justifies it. It does NOT name the
+# parameters.
+#
+# That is a change made after measuring, and it is the same move as the
+# deterministic classifier in triage. The first live run had `qwen3:1.7b`
+# fail plan validation on 3 of 5 attempts, and — more tellingly — copy the
+# prompt's `<service>-data` placeholder into the plan *verbatim* as a
+# volume name. A garbage volume name that passes a non-empty check is
+# worse than a rejected plan: it reaches a human for approval looking
+# legitimate.
+#
+# So parameters are derived in code. "Give the service headroom over
+# current usage" is arithmetic, and "which volume belongs to target-db" is
+# a lookup. Neither is judgement, and asking a 1.7B for them buys
+# non-determinism for nothing.
+#
+# What the model still does is real: it confirms the action against the
+# evidence, and it writes the `rationale` a human reads at 3am when
+# deciding whether to approve. That text is the whole value of the call.
 PLAN_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "tool": {"type": "string", "enum": list(ALLOWED_TOOLS)},
         "service": {"type": "string"},
-        "limit_mb": {"type": "integer", "minimum": 64, "maximum": 4096},
-        "volume": {"type": "string"},
         "rationale": {"type": "string"},
     },
     "required": ["tool", "service", "rationale"],
     "additionalProperties": False,
 }
 
-# Which arguments each tool actually needs. Validated before the plan
-# leaves the agent, so a call is never dispatched with a missing one.
-REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
-    "restart_service": ("service",),
-    "scale_memory": ("service", "limit_mb"),
-    "drop_volume": ("volume",),
+# Which volume belongs to which service. An explicit map, not a naming
+# convention: a convention silently produces a plausible name for a
+# service that has no volume, and the first time that matters is when a
+# human approves the deletion of something that does not exist — or worse,
+# of something that does and should not have been reachable.
+MANAGED_VOLUMES: dict[str, str] = {
+    "target-db": "sovops_pgdata",
 }
+
+# Headroom multiplier for `scale_memory`, and the clamp the tool enforces.
+MEMORY_HEADROOM_FACTOR = 2
+MEMORY_MIN_MB, MEMORY_MAX_MB = 64, 4096
+MEMORY_DEFAULT_MB = 512
 
 PLAN_SYSTEM = (
     "You are an SRE remediation planner. Given a diagnosed failure mode and "
-    "current service metrics, choose ONE action and its parameters. "
-    "Reply only with JSON matching the schema. Be conservative: prefer the "
-    "smallest action that addresses the diagnosed cause. /no_think"
+    "current service metrics, confirm ONE action from the allowed list and "
+    "explain why it addresses the diagnosed cause. A human may read your "
+    "rationale before authorising the action, so make it specific and cite "
+    "the evidence. Do not invent parameters — they are computed for you. "
+    "Reply only with JSON matching the schema. /no_think"
 )
 
 
@@ -157,19 +177,41 @@ def _validate_plan(plan: dict[str, Any], *, expected_service: str) -> dict[str, 
             f"plan targets {service!r} but the incident is about {expected_service!r}"
         )
 
-    missing = [arg for arg in REQUIRED_ARGS.get(tool, ()) if not plan.get(arg)]
-    if missing:
-        # Caught here rather than at dispatch: a plan that cannot be
-        # executed should fail as an invalid plan, not as a tool error
-        # three layers down where the cause is no longer obvious.
-        raise PlanRejected(f"{tool} requires {missing} — the plan does not name them")
-
-    if tool == "scale_memory":
-        limit = plan.get("limit_mb")
-        if not isinstance(limit, int) or not (64 <= limit <= 4096):
-            raise PlanRejected(f"scale_memory needs a limit_mb in [64, 4096], got {limit!r}")
+    if not str(plan.get("rationale", "")).strip():
+        # The rationale is the only part of the plan the model actually
+        # produces, and it is what a human reads before authorising. An
+        # empty one means the call bought nothing.
+        raise PlanRejected(f"{tool} plan carries no rationale")
 
     return plan
+
+
+def derive_arguments(tool: str, service: str, signals: dict[str, Any]) -> dict[str, Any]:
+    """Compute the tool's parameters. No model involved.
+
+    Raises `PlanRejected` rather than guessing when the parameter cannot
+    be derived — a `drop_volume` on a service with no registered volume
+    is not a call to make up a name for.
+    """
+    if tool == "restart_service":
+        return {"service": service}
+
+    if tool == "scale_memory":
+        current_bytes = int(signals.get("memory_limit_bytes") or 0)
+        current_mb = current_bytes // 1_048_576 if current_bytes else MEMORY_DEFAULT_MB
+        target = max(MEMORY_MIN_MB, min(current_mb * MEMORY_HEADROOM_FACTOR, MEMORY_MAX_MB))
+        return {"service": service, "limit_mb": target}
+
+    if tool == "drop_volume":
+        volume = MANAGED_VOLUMES.get(service)
+        if not volume:
+            raise PlanRejected(
+                f"no managed volume registered for {service!r}; "
+                "refusing to name one that may not exist"
+            )
+        return {"service": service, "volume": volume}
+
+    raise PlanRejected(f"no argument derivation for tool {tool!r}")
 
 
 class RemediationAgent:
@@ -226,15 +268,16 @@ class RemediationAgent:
     def _plan(
         self, failure_mode: str, service: str, signals: dict, candidate: str
     ) -> dict[str, Any]:
+        derived = derive_arguments(candidate, service, signals)
         prompt = (
             f"Diagnosed failure mode: {failure_mode}\n"
             f"Service: {service}\n"
             f"Current metrics: {json.dumps(signals, default=str)}\n"
-            f"The indicated action for this failure mode is `{candidate}`.\n"
-            f"Choose the parameters. If the action is scale_memory, pick a new "
-            f"limit_mb that gives headroom over current usage without being wasteful. "
-            f"If the action is drop_volume, name the volume as `<service>-data`; it "
-            f"will not execute without a human authorising this exact volume."
+            f"The indicated action is `{candidate}` with parameters "
+            f"{json.dumps({k: v for k, v in derived.items() if k != 'service'})}, "
+            f"already computed.\n"
+            f"Confirm the action and explain, citing the metrics above, why it "
+            f"addresses the diagnosed cause."
         )
         completion = self._gateway.complete(
             task_class=TaskClass.PLAN,
@@ -245,22 +288,23 @@ class RemediationAgent:
         plan = extract_json(completion.text)
         plan.setdefault("service", service)
         plan.setdefault("tool", candidate)
-        plan["_model"] = completion.model
-        plan["_sovereign"] = completion.sovereign
-        plan["_latency_ms"] = completion.latency_ms
-        return _validate_plan(plan, expected_service=service)
+        validated = _validate_plan(plan, expected_service=service)
+
+        # Parameters are re-derived for the *validated* tool, not merged from
+        # the model's output: if the model chose a different (still allowed)
+        # action than the candidate, its parameters must follow that choice.
+        validated["arguments"] = derive_arguments(validated["tool"], service, signals)
+        validated["_model"] = completion.model
+        validated["_sovereign"] = completion.sovereign
+        validated["_latency_ms"] = completion.latency_ms
+        return validated
 
     # -- application --------------------------------------------------------
 
     def _apply(
         self, task: Task, plan: dict[str, Any], *, episode_id: str, actor: ActorContext
     ) -> None:
-        arguments = {
-            k: v
-            for k, v in plan.items()
-            if k in {"service", "limit_mb", "volume"} and v is not None
-        }
-        arguments["episode_id"] = episode_id
+        arguments = dict(plan["arguments"]) | {"episode_id": episode_id}
 
         outcome = self._ops.call(
             token=self._token,
@@ -334,12 +378,13 @@ class RemediationAgent:
             )
             return
 
-        arguments = {
-            k: v
-            for k, v in plan.items()
-            if k in {"service", "limit_mb", "volume"} and v is not None
-        }
-        arguments |= {
+        # The arguments stored on the task at plan time, not recomputed:
+        # the human approved *these*, and re-deriving could produce a
+        # different value if the metrics moved between the pause and the
+        # approval. The tool server checks the hash matches anyway, so a
+        # drift would be rejected — but failing there would look like a
+        # bug rather than the safety property it is.
+        arguments = dict(plan["arguments"]) | {
             "episode_id": episode_id,
             "approval_ref": payload["approval_ref"],
             "approver": payload.get("approver", actor.actor),
