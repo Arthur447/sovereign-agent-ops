@@ -80,16 +80,30 @@ CANDIDATE_TOOL: dict[str, str] = {
     FailureMode.DISK_PRESSURE: "drop_volume",
 }
 
+# The union of every allowed tool's arguments. A field missing here is a
+# tool that can be *chosen* but never *parameterised* — the plan travels,
+# the call fails on a missing argument, and the failure surfaces as a
+# broken agent rather than as the schema gap it is. Found exactly that way
+# by the demo: `drop_volume` had no `volume`.
 PLAN_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "tool": {"type": "string", "enum": list(ALLOWED_TOOLS)},
         "service": {"type": "string"},
         "limit_mb": {"type": "integer", "minimum": 64, "maximum": 4096},
+        "volume": {"type": "string"},
         "rationale": {"type": "string"},
     },
     "required": ["tool", "service", "rationale"],
     "additionalProperties": False,
+}
+
+# Which arguments each tool actually needs. Validated before the plan
+# leaves the agent, so a call is never dispatched with a missing one.
+REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
+    "restart_service": ("service",),
+    "scale_memory": ("service", "limit_mb"),
+    "drop_volume": ("volume",),
 }
 
 PLAN_SYSTEM = (
@@ -142,6 +156,13 @@ def _validate_plan(plan: dict[str, Any], *, expected_service: str) -> dict[str, 
         raise PlanRejected(
             f"plan targets {service!r} but the incident is about {expected_service!r}"
         )
+
+    missing = [arg for arg in REQUIRED_ARGS.get(tool, ()) if not plan.get(arg)]
+    if missing:
+        # Caught here rather than at dispatch: a plan that cannot be
+        # executed should fail as an invalid plan, not as a tool error
+        # three layers down where the cause is no longer obvious.
+        raise PlanRejected(f"{tool} requires {missing} — the plan does not name them")
 
     if tool == "scale_memory":
         limit = plan.get("limit_mb")
@@ -211,7 +232,9 @@ class RemediationAgent:
             f"Current metrics: {json.dumps(signals, default=str)}\n"
             f"The indicated action for this failure mode is `{candidate}`.\n"
             f"Choose the parameters. If the action is scale_memory, pick a new "
-            f"limit_mb that gives headroom over current usage without being wasteful."
+            f"limit_mb that gives headroom over current usage without being wasteful. "
+            f"If the action is drop_volume, name the volume as `<service>-data`; it "
+            f"will not execute without a human authorising this exact volume."
         )
         completion = self._gateway.complete(
             task_class=TaskClass.PLAN,

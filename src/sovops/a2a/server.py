@@ -35,6 +35,7 @@ from typing import Any
 
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse
+from opentelemetry import context
 
 from sovops.a2a.types import (
     A2A_VERSION,
@@ -56,6 +57,7 @@ from sovops.a2a.types import (
     TaskState,
     TaskStatus,
 )
+from sovops.telemetry import tracing
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +138,22 @@ def build_a2a_app(
         if principal is None:
             return _rpc_error(None, ERR_INVALID_REQUEST, "unauthenticated", status=401)
 
+        # Adopt the caller's trace before doing anything else, so this
+        # agent's spans hang under the incident that caused them rather
+        # than starting a second root.
+        otel_token = context.attach(tracing.extract_context(dict(request.headers)))
+        try:
+            return await _dispatch(request, tasks, handler, principal, x_sovops_actor)
+        finally:
+            context.detach(otel_token)
+
+    async def _dispatch(
+        request: Request,
+        tasks: TaskStore,
+        handler: TaskHandler,
+        principal: str,
+        x_sovops_actor: str | None,
+    ) -> JSONResponse:
         try:
             payload = await request.json()
         except Exception:
@@ -152,7 +170,11 @@ def build_a2a_app(
         actor = ActorContext.from_header(x_sovops_actor)
 
         if method == METHOD_MESSAGE_SEND:
-            return await _handle_send(tasks, handler, rpc_id, params, actor)
+            with tracing.span(
+                f"a2a.serve {METHOD_MESSAGE_SEND}",
+                **{"sovops.principal": principal, "sovops.actor": actor.actor},
+            ):
+                return await _handle_send(tasks, handler, rpc_id, params, actor)
         if method == METHOD_TASKS_GET:
             task = tasks.get(params.get("id", ""))
             if task is None:

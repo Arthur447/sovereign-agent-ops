@@ -1,0 +1,89 @@
+# The whole stack, one command.
+#
+# Three layers, deliberately visible as three:
+#   - `sovops-ollama`  the sovereign inference endpoint. In production this
+#                      is vLLM behind the same OpenAI-compatible API; the
+#                      agents' code does not change, only SOVOPS_INFERENCE_URL.
+#   - `target-*`       the estate the agents operate on. Ordinary containers
+#                      with deliberately tight limits so faults are cheap to
+#                      inject and observable in seconds.
+#   - `jaeger`         where the traces land.
+#
+# The agents themselves run on the host during development (`make demo`), so
+# their MCP tools can drive the Docker socket without mounting it into a
+# container — an agent that can reach the Docker socket can escape any limit
+# you put on its own container, and pretending otherwise would be theatre.
+
+services:
+  sovops-ollama:
+    image: ollama/ollama:latest
+    container_name: sovops-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - sovops_ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    container_name: sovops-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # UI
+      - "4318:4318"     # OTLP/HTTP — what the agents export to
+
+  # --- the estate under management ---------------------------------------
+
+  target-api:
+    image: python:3.12-slim
+    container_name: target-api
+    command: >
+      python -c "
+      import http.server, socketserver, os, time;
+      class H(http.server.BaseHTTPRequestHandler):
+          def do_GET(s):
+              time.sleep(float(os.environ.get('LATENCY_S','0')));
+              s.send_response(200); s.end_headers(); s.wfile.write(b'ok')
+          def log_message(s,*a): pass
+      socketserver.TCPServer(('',8080), H).serve_forever()
+      "
+    mem_limit: 128m
+    restart: unless-stopped
+
+  target-worker:
+    image: python:3.12-slim
+    container_name: target-worker
+    # Allocates in a loop. With a 64m limit it OOMs on schedule, which is
+    # what makes the memory_exhaustion scenario reproducible rather than
+    # something you wait around for.
+    command: >
+      python -c "
+      import os, time;
+      grow = os.environ.get('LEAK','0') == '1';
+      buf = [];
+      while True:
+          if grow: buf.append(bytearray(4*1024*1024))
+          time.sleep(0.5)
+      "
+    mem_limit: 64m
+    restart: unless-stopped
+
+  target-db:
+    image: postgres:16-alpine
+    container_name: target-db
+    environment:
+      POSTGRES_PASSWORD: sovops
+      POSTGRES_DB: sovops
+    volumes:
+      - sovops_pgdata:/var/lib/postgresql/data
+    mem_limit: 256m
+    restart: unless-stopped
+
+volumes:
+  sovops_ollama:
+  sovops_pgdata:

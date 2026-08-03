@@ -282,6 +282,7 @@ def test_disk_pressure_pauses_for_a_human():
             {
                 "tool": "drop_volume",
                 "service": "target-db",
+                "volume": "target-db-data",
                 "rationale": "reclaim space by dropping the stale volume",
             }
         ],
@@ -306,7 +307,14 @@ def test_disk_pressure_pauses_for_a_human():
 
 def test_the_refusal_is_in_the_ledger_with_its_reason():
     app, ledger, _, _ = build_stack(
-        plan_responses=[{"tool": "drop_volume", "service": "target-db", "rationale": "x"}],
+        plan_responses=[
+            {
+                "tool": "drop_volume",
+                "service": "target-db",
+                "volume": "target-db-data",
+                "rationale": "x",
+            }
+        ],
         applied=[],
     )
     post_incident(app, {"service": "target-db", "signals": {"disk_percent": "96%"}})
@@ -317,6 +325,24 @@ def test_the_refusal_is_in_the_ledger_with_its_reason():
     assert "cannot be undone" in refusals[0].reason
     ok, _ = ledger.verify()
     assert ok
+
+
+def test_plan_missing_a_required_argument_never_dispatches():
+    """Found by the demo: a `drop_volume` plan with no volume reached the
+    tool layer and failed there. An unexecutable plan is an invalid plan,
+    and it must fail as one."""
+    applied: list[str] = []
+    app, _, _, _ = build_stack(
+        plan_responses=[{"tool": "drop_volume", "service": "target-db", "rationale": "x"}],
+        applied=applied,
+    )
+    task = post_incident(app, {"service": "target-db", "signals": {"disk_percent": "96%"}})
+    assert task["status"]["state"] == str(TaskState.FAILED)
+    assert applied == []
+    # Triage's own message wraps the peer's — the failure surfaces through
+    # the delegation rather than being flattened into a generic error.
+    surfaced = task["status"]["message"]["parts"][0]["data"]
+    assert "requires ['volume']" in surfaced["detail"]["error"]
 
 
 def test_healthy_service_produces_no_action_and_no_model_call():

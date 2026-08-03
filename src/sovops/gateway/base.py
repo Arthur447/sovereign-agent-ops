@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
+from sovops.telemetry import tracing
+
 
 class TaskClass(StrEnum):
     """What a call is *for*. Routing keys off this, never off a model name.
@@ -159,25 +161,37 @@ class LlmGateway:
         )
         backend = self._backends[spec.backend]
 
-        started = time.perf_counter()
-        text, tok_in, tok_out = backend.complete(
-            model=spec.id,
-            system=system,
-            user=user,
-            max_tokens=spec.max_output_tokens,
-            json_schema=json_schema,
-        )
-        latency_ms = int((time.perf_counter() - started) * 1000)
+        with tracing.span(
+            f"llm.{task_class}",
+            **{
+                "gen_ai.operation.name": "chat",
+                "gen_ai.request.model": spec.id,
+                "sovops.task_class": str(task_class),
+                "sovops.escalated": allow_escalation,
+                "sovops.escalation_reason": escalation_reason,
+            },
+        ) as current:
+            started = time.perf_counter()
+            text, tok_in, tok_out = backend.complete(
+                model=spec.id,
+                system=system,
+                user=user,
+                max_tokens=spec.max_output_tokens,
+                json_schema=json_schema,
+            )
+            latency_ms = int((time.perf_counter() - started) * 1000)
 
-        return Completion(
-            text=text,
-            model=spec.id,
-            input_tokens=tok_in,
-            output_tokens=tok_out,
-            cost_eur=spec.cost_eur(tok_in, tok_out),
-            latency_ms=latency_ms,
-            sovereign=spec.sovereign,
-        )
+            completion = Completion(
+                text=text,
+                model=spec.id,
+                input_tokens=tok_in,
+                output_tokens=tok_out,
+                cost_eur=spec.cost_eur(tok_in, tok_out),
+                latency_ms=latency_ms,
+                sovereign=spec.sovereign,
+            )
+            tracing.record_completion(current, completion)
+            return completion
 
 
 @dataclass(frozen=True)

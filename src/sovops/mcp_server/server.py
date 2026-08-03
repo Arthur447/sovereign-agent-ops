@@ -50,6 +50,7 @@ from typing import Any
 from sovops.audit.ledger import Ledger, hash_params
 from sovops.mcp_server.registry import ToolRegistry, ToolSpec
 from sovops.policy.reversibility import Decision, EpisodeBudget, ReversibilityGate
+from sovops.telemetry import tracing
 
 logger = logging.getLogger(__name__)
 
@@ -150,8 +151,7 @@ class OpsToolService:
         schema["properties"]["approval_ref"] = {
             "type": "string",
             "description": (
-                "Approval reference, when re-calling after a human "
-                "authorised a refused action."
+                "Approval reference, when re-calling after a human authorised a refused action."
             ),
         }
         schema["properties"]["approver"] = {
@@ -164,6 +164,41 @@ class OpsToolService:
     # -- invocation ---------------------------------------------------------
 
     def call(
+        self,
+        *,
+        token: str,
+        tool: str,
+        arguments: dict[str, Any],
+        trace_id: str,
+        task_id: str,
+        agent_id: str,
+    ) -> CallOutcome:
+        with tracing.span(
+            f"mcp.tools/call {tool}",
+            **{
+                "sovops.tool": tool,
+                "sovops.task_id": task_id,
+                "sovops.agent_id": agent_id,
+                "sovops.episode_id": arguments.get("episode_id"),
+            },
+        ) as current:
+            outcome = self._call(
+                token=token,
+                tool=tool,
+                arguments=arguments,
+                # Prefer the live trace when there is one: an id passed down
+                # from a caller can go stale, the active context cannot.
+                trace_id=tracing.current_trace_id() or trace_id,
+                task_id=task_id,
+                agent_id=agent_id,
+            )
+            current.set_attribute("sovops.decision", outcome.decision or outcome.status)
+            current.set_attribute("sovops.status", outcome.status)
+            if outcome.reason:
+                current.set_attribute("sovops.reason", outcome.reason[:300])
+            return outcome
+
+    def _call(
         self,
         *,
         token: str,

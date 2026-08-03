@@ -34,6 +34,7 @@ from sovops.a2a.types import (
     Part,
     Role,
 )
+from sovops.telemetry import tracing
 
 DEFAULT_TIMEOUT_S = 600.0  # sovereign inference on CPU is slow; see README
 
@@ -89,19 +90,26 @@ class A2AClient:
             "method": method,
             "params": params,
         }
-        with self._client() as client:
-            resp = client.post(
-                f"{self._base_url}/",
-                json=body,
-                headers={
-                    "Authorization": f"Bearer {self._token}",
-                    "A2A-Version": A2A_VERSION,
-                    # Not an A2A field. See `ActorContext` — the protocol carries
-                    # no identity, so delegation rides beside it and lands in the
-                    # audit ledger.
-                    "X-Sovops-Actor": self._actor.to_header(),
-                },
-            )
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "A2A-Version": A2A_VERSION,
+            # Not an A2A field. See `ActorContext` — the protocol carries
+            # no identity, so delegation rides beside it and lands in the
+            # audit ledger.
+            "X-Sovops-Actor": self._actor.to_header(),
+        }
+        # W3C traceparent. A2A defines no trace field either, but the spec
+        # recommends OpenTelemetry propagation over the HTTP headers —
+        # without it each agent emits a disconnected trace and one incident
+        # looks like two.
+        tracing.inject_context(headers)
+
+        with tracing.span(
+            f"a2a.{method}",
+            **{"sovops.peer": self._base_url, "sovops.actor": self._actor.actor},
+        ):
+            with self._client() as client:
+                resp = client.post(f"{self._base_url}/", json=body, headers=headers)
         payload = resp.json()
         if "error" in payload:
             err = payload["error"]
