@@ -58,7 +58,14 @@ CLASSIFY_SCHEMA: dict[str, Any] = {
     "properties": {
         "failure_mode": {
             "type": "string",
-            "enum": [m for m in FailureMode if m != FailureMode.UNKNOWN],
+            # Neither non-answer is the model's to give. UNKNOWN is the
+            # state we are asking it to resolve. BLIND is a fact about the
+            # sensor, established by `classify` before any prompt exists —
+            # letting the model claim it would let a bad reading of good
+            # data masquerade as a broken instrument.
+            "enum": [
+                m for m in FailureMode if m not in (FailureMode.UNKNOWN, FailureMode.BLIND)
+            ],
         },
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "reasoning": {"type": "string"},
