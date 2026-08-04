@@ -98,16 +98,22 @@ class A2AClient:
             # audit ledger.
             "X-Sovops-Actor": self._actor.to_header(),
         }
-        # W3C traceparent. A2A defines no trace field either, but the spec
-        # recommends OpenTelemetry propagation over the HTTP headers —
-        # without it each agent emits a disconnected trace and one incident
-        # looks like two.
-        tracing.inject_context(headers)
-
         with tracing.span(
             f"a2a.{method}",
             **{"sovops.peer": self._base_url, "sovops.actor": self._actor.actor},
         ):
+            # W3C traceparent. A2A defines no trace field either, but the spec
+            # recommends OpenTelemetry propagation over the HTTP headers —
+            # without it each agent emits a disconnected trace and one incident
+            # looks like two.
+            #
+            # Injected *inside* the span, not before it. Injecting first
+            # propagates this agent's own parent, so the peer's server span
+            # lands as a sibling of the call instead of inside it: same trace,
+            # but "the peer took 2.4 of these 21 ms" becomes unreadable, and
+            # with two outbound calls there is nothing tying a server span to
+            # the call that caused it.
+            tracing.inject_context(headers)
             with self._client() as client:
                 resp = client.post(f"{self._base_url}/", json=body, headers=headers)
         payload = resp.json()
