@@ -29,12 +29,12 @@ from sovops.agents.remediation.agent import build_card as remediation_card
 from sovops.agents.triage.agent import TriageAgent
 from sovops.agents.triage.agent import build_card as triage_card
 from sovops.evals.harness import (
-    READ_TOKEN,
     WRITE_TOKEN,
     Recorder,
     build_gateway,
     build_ops,
     build_registry,
+    build_tool_clients,
 )
 from sovops.evals.runner import StubBackend
 from sovops.telemetry import tracing
@@ -61,7 +61,8 @@ def build(signals: dict, backend):
     ops, ledger = build_ops(registry)
     gateway = build_gateway(backend)
 
-    remediation = RemediationAgent(ops=ops, gateway=gateway, token=WRITE_TOKEN)
+    triage_tools, remediation_tools = build_tool_clients(ops)
+    remediation = RemediationAgent(tools=remediation_tools, gateway=gateway)
     remediation_app = build_a2a_app(
         card=remediation_card("http://remediation.demo"),
         handler=remediation.handle,
@@ -73,7 +74,7 @@ def build(signals: dict, backend):
         actor=ActorContext(actor="triage-agent", on_behalf_of="alertmanager"),
         http_client=TestClient(remediation_app, base_url="http://remediation.demo"),
     )
-    triage = TriageAgent(ops=ops, gateway=gateway, token=READ_TOKEN, remediation=peer)
+    triage = TriageAgent(tools=triage_tools, gateway=gateway, remediation=peer)
     triage_app = build_a2a_app(
         card=triage_card("http://triage.demo"),
         handler=triage.handle,

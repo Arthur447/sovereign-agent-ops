@@ -12,8 +12,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from sovops.evals.harness import READ_TOKEN, WRITE_TOKEN, Recorder, build_ops, build_registry
+from sovops.mcp_client import MCPClient
 from sovops.mcp_server.app import build_mcp_app
-from sovops.mcp_server.client import MCPClient
 from sovops.mcp_server.server import ToolAccessDenied
 
 SIGNALS = {"restart_count": 7, "memory_percent": "99.4%", "memory_limit_bytes": 536870912}

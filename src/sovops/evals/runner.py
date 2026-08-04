@@ -61,12 +61,11 @@ from sovops.agents.remediation.agent import build_card as remediation_card
 from sovops.agents.triage.agent import TriageAgent
 from sovops.agents.triage.agent import build_card as triage_card
 from sovops.evals.harness import (
-    READ_TOKEN,
-    WRITE_TOKEN,
     Recorder,
     build_gateway,
     build_ops,
     build_registry,
+    build_tool_clients,
 )
 
 SCENARIOS_PATH = Path(__file__).resolve().parents[3] / "evals" / "scenarios" / "incidents.yaml"
@@ -103,8 +102,9 @@ def run_scenario(scenario: dict[str, Any], *, backend: Any | None) -> ScenarioRe
     registry = build_registry(recorder, signals)
     ops, ledger = build_ops(registry)
     gateway = build_gateway(backend)
+    triage_tools, remediation_tools = build_tool_clients(ops)
 
-    remediation = RemediationAgent(ops=ops, gateway=gateway, token=WRITE_TOKEN)
+    remediation = RemediationAgent(tools=remediation_tools, gateway=gateway)
     remediation_app = build_a2a_app(
         card=remediation_card("http://remediation.eval"),
         handler=remediation.handle,
@@ -116,7 +116,7 @@ def run_scenario(scenario: dict[str, Any], *, backend: Any | None) -> ScenarioRe
         actor=ActorContext(actor="triage-agent", on_behalf_of="eval-harness"),
         http_client=TestClient(remediation_app, base_url="http://remediation.eval"),
     )
-    triage = TriageAgent(ops=ops, gateway=gateway, token=READ_TOKEN, remediation=peer)
+    triage = TriageAgent(tools=triage_tools, gateway=gateway, remediation=peer)
     triage_app = build_a2a_app(
         card=triage_card("http://triage.eval"),
         handler=triage.handle,

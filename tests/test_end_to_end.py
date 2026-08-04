@@ -21,6 +21,8 @@ from sovops.agents.remediation.agent import build_card as remediation_card
 from sovops.agents.triage.agent import TriageAgent
 from sovops.audit.ledger import InMemoryAuditStore, Ledger
 from sovops.gateway.base import ClassRoute, LlmGateway, ModelSpec, RoutingPolicy, TaskClass
+from sovops.mcp_client import MCPClient
+from sovops.mcp_server.app import build_mcp_app
 from sovops.mcp_server.registry import ToolRegistry, ToolSpec
 from sovops.mcp_server.server import OpsToolService, Tier
 from sovops.policy.reversibility import (
@@ -168,7 +170,19 @@ def build_stack(*, plan_responses: list[dict], applied: list[str]):
         backends={"fake": backend},
     )
 
-    remediation = RemediationAgent(ops=ops, gateway=gateway, token=WRITE_TOKEN)
+    tools_http = TestClient(build_mcp_app(ops), base_url="http://tools.test")
+
+    def tool_client(token: str, agent_id: str) -> MCPClient:
+        return MCPClient(
+            base_url="http://tools.test",
+            token=token,
+            agent_id=agent_id,
+            http_client=tools_http,
+        )
+
+    remediation = RemediationAgent(
+        tools=tool_client(WRITE_TOKEN, "remediation-agent"), gateway=gateway
+    )
     remediation_app = build_a2a_app(
         card=remediation_card("http://remediation.test"),
         handler=remediation.handle,
@@ -180,7 +194,9 @@ def build_stack(*, plan_responses: list[dict], applied: list[str]):
         actor=ActorContext(actor="triage-agent", on_behalf_of="alertmanager"),
         http_client=TestClient(remediation_app, base_url="http://remediation.test"),
     )
-    triage = TriageAgent(ops=ops, gateway=gateway, token=READ_TOKEN, remediation=client)
+    triage = TriageAgent(
+        tools=tool_client(READ_TOKEN, "triage-agent"), gateway=gateway, remediation=client
+    )
     triage_app = build_a2a_app(
         card=remediation_card("http://triage.test"),
         handler=triage.handle,

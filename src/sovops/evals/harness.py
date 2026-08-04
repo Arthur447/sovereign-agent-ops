@@ -20,6 +20,8 @@ from typing import Any
 from sovops.audit.ledger import InMemoryAuditStore, Ledger
 from sovops.gateway.base import Backend, LlmGateway, TaskClass
 from sovops.gateway.routing import load_routing_policy
+from sovops.mcp_client import MCPClient
+from sovops.mcp_server.app import build_mcp_app
 from sovops.mcp_server.registry import ToolRegistry, ToolSpec
 from sovops.mcp_server.server import OpsToolService, Tier
 from sovops.policy.reversibility import (
@@ -202,6 +204,33 @@ def build_gateway(backend: Backend | None = None) -> MeteredGateway:
     return MeteredGateway(inner=LlmGateway(policy=policy, backends=backends))
 
 
+def build_tool_clients(ops: OpsToolService) -> tuple[MCPClient, MCPClient]:
+    """Each agent's handle to the tool server, over its real transport.
+
+    Driven by a Starlette `TestClient` rather than a socket: the request
+    travels the same routing, the same bearer check and the same handlers
+    — it simply skips the network card. What matters is that the agents
+    have no other way in, which `tests/test_agent_isolation.py` enforces.
+    """
+    from starlette.testclient import TestClient
+
+    http = TestClient(build_mcp_app(ops), base_url="http://tools.eval")
+    return (
+        MCPClient(
+            base_url="http://tools.eval",
+            token=READ_TOKEN,
+            agent_id="triage-agent",
+            http_client=http,
+        ),
+        MCPClient(
+            base_url="http://tools.eval",
+            token=WRITE_TOKEN,
+            agent_id="remediation-agent",
+            http_client=http,
+        ),
+    )
+
+
 def build_ops(registry: ToolRegistry) -> tuple[OpsToolService, Ledger]:
     ledger = Ledger(InMemoryAuditStore())
     ops = OpsToolService(
@@ -221,5 +250,6 @@ __all__ = [
     "TaskClass",
     "build_gateway",
     "build_ops",
+    "build_tool_clients",
     "build_registry",
 ]

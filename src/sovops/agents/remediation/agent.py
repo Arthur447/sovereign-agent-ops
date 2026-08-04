@@ -54,7 +54,7 @@ from sovops.a2a.types import (
 from sovops.agents.triage.rules import FailureMode
 from sovops.gateway.backends import extract_json
 from sovops.gateway.base import LlmGateway, TaskClass
-from sovops.mcp_server.server import OpsToolService
+from sovops.mcp_client import MCPClient
 
 logger = logging.getLogger(__name__)
 
@@ -238,10 +238,12 @@ def derive_arguments(tool: str, service: str, signals: dict[str, Any]) -> dict[s
 class RemediationAgent:
     """A2A handler. One instance per process."""
 
-    def __init__(self, *, ops: OpsToolService, gateway: LlmGateway, token: str) -> None:
-        self._ops = ops
+    def __init__(self, *, tools: MCPClient, gateway: LlmGateway) -> None:
+        # The operator credential is not held here: it lives inside the
+        # client, which is the only handle this agent has to the tool
+        # server. An agent cannot present a credential it was never given.
+        self._tools = tools
         self._gateway = gateway
-        self._token = token  # operator tier
 
     async def handle(self, task: Task, message: Message, actor: ActorContext) -> None:
         payload = message.first_data()
@@ -346,13 +348,8 @@ class RemediationAgent:
     ) -> None:
         arguments = dict(plan["arguments"]) | {"episode_id": episode_id}
 
-        outcome = self._ops.call(
-            token=self._token,
-            tool=plan["tool"],
-            arguments=arguments,
-            trace_id=task.metadata.get("trace_id", task.id),
-            task_id=task.id,
-            agent_id=AGENT_ID,
+        outcome = self._tools.call(
+            tool=plan["tool"], arguments=arguments, task_id=task.id
         )
 
         if outcome.status == "approval_required":
@@ -435,13 +432,8 @@ class RemediationAgent:
             "approver": payload.get("approver", actor.actor),
         }
 
-        outcome = self._ops.call(
-            token=self._token,
-            tool=plan["tool"],
-            arguments=arguments,
-            trace_id=task.metadata.get("trace_id", task.id),
-            task_id=task.id,
-            agent_id=AGENT_ID,
+        outcome = self._tools.call(
+            tool=plan["tool"], arguments=arguments, task_id=task.id
         )
 
         if outcome.status != "ok":

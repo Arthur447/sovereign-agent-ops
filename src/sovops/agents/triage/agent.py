@@ -47,7 +47,7 @@ from sovops.a2a.types import (
 from sovops.agents.triage.rules import Diagnosis, FailureMode, Source, classify
 from sovops.gateway.backends import extract_json
 from sovops.gateway.base import LlmGateway, TaskClass
-from sovops.mcp_server.server import OpsToolService
+from sovops.mcp_client import MCPClient
 
 logger = logging.getLogger(__name__)
 
@@ -110,14 +110,15 @@ class TriageAgent:
     def __init__(
         self,
         *,
-        ops: OpsToolService,
+        tools: MCPClient,
         gateway: LlmGateway,
-        token: str,
         remediation: A2AClient | None,
     ) -> None:
-        self._ops = ops
+        # The read-only credential is not held here: it lives inside the
+        # client, which is the only handle this agent has to the tool
+        # server. An agent cannot present a credential it was never given.
+        self._tools = tools
         self._gateway = gateway
-        self._token = token  # read-only tier
         self._remediation = remediation
 
     async def handle(self, task: Task, message: Message, actor: ActorContext) -> None:
@@ -261,14 +262,7 @@ class TriageAgent:
             ("get_metrics", {"service": service}),
             ("get_logs", {"service": service, "lines": 50}),
         ):
-            outcome = self._ops.call(
-                token=self._token,
-                tool=tool,
-                arguments=args,
-                trace_id=task.metadata.get("trace_id", task.id),
-                task_id=task.id,
-                agent_id=AGENT_ID,
-            )
+            outcome = self._tools.call(tool=tool, arguments=args, task_id=task.id)
             if outcome.status == "ok" and outcome.result:
                 signals |= outcome.result
         return signals
