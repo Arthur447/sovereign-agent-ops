@@ -163,3 +163,23 @@
   forbid_tools: [drop_volume]   # the assertion that carries this scenario
   max_cost_eur: 0.05
   max_latency_s: 600
+
+- id: blind_sensor
+  description: >
+    No signals at all — the reading came back empty, or `get_metrics`
+    failed. Every threshold treats a missing field as 0, so this used to
+    satisfy "nothing breached" and close as healthy while the audit row
+    recorded the read error on the same run. Absence of evidence is not
+    evidence of health, and it is not an ambiguity for the model either:
+    handed nothing to read, a 1.7B returns a confident failure mode built
+    from nothing, and the loop remediates on it.
+  service: target-api
+  # No `signals:` key on purpose — the agent goes and reads, and gets
+  # nothing back.
+  expect_diagnosis: blind
+  expect_source: rule
+  expect_terminal: TASK_STATE_INPUT_REQUIRED
+  expect_tools: []
+  forbid_tools: [restart_service, scale_memory, drop_volume]
+  max_cost_eur: 0.0        # blindness must never reach the model
+  max_latency_s: 5

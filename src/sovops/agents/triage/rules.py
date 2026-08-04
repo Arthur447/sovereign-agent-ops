@@ -51,7 +51,14 @@ class FailureMode(StrEnum):
     LATENCY_DEGRADATION = "latency_degradation"
     CONFIG_DRIFT = "config_drift"
     HEALTHY = "healthy"
+    # Two different unknowns, kept apart on purpose. UNKNOWN means the
+    # evidence conflicts — that is a judgement call, and the case a model
+    # is genuinely better at than a threshold. BLIND means there is no
+    # evidence, and a model handed nothing to read does not abstain, it
+    # invents a plausible failure mode. Collapsing the two sends the
+    # blind case to the model and gets an incident remediated on a guess.
     UNKNOWN = "unknown"
+    BLIND = "blind"
 
 
 class Source(StrEnum):
@@ -81,6 +88,10 @@ CRASH_LOOP_RESTARTS = 5
 DISK_PRESSURE_PERCENT = 90.0
 LATENCY_P99_MS = 2000.0
 HIGH_CPU_PERCENT = 80.0
+
+# What a working `get_metrics` always returns. Their absence is a broken
+# sensor, and a broken sensor is not a healthy service — see rule 6.
+SENSOR_GUARANTEED_FIELDS = ("restart_count", "memory_percent")
 
 
 def _percent(raw: Any) -> float:
@@ -157,7 +168,28 @@ def classify(signals: dict[str, Any]) -> Diagnosis:
             ["config_changed_recently=true", f"restart_count={restarts}"],
         )
 
-    # 6. Everything nominal.
+    # 6. Everything nominal — but only if anything was actually observed.
+    #
+    #    Every threshold above reads a missing field as 0, so an empty
+    #    signal dict satisfies all of them and produces `healthy`. That is
+    #    how a blind agent reports all-green: `get_metrics` raising, an
+    #    unreachable endpoint and a genuinely idle service all arrive here
+    #    as the same dict, and only one of them is good news.
+    #
+    #    The guard names the fields `get_metrics` contractually returns, so
+    #    their absence means the sensor failed, not that the service is
+    #    fine. `disk_percent` and `p99_latency_ms` are deliberately not in
+    #    the list: no tool in the registry produces them, and requiring
+    #    them would escalate every healthy service to a human.
+    if not all(field in signals for field in SENSOR_GUARANTEED_FIELDS):
+        missing = [f for f in SENSOR_GUARANTEED_FIELDS if f not in signals]
+        return Diagnosis(
+            FailureMode.BLIND,
+            0.0,
+            Source.RULE,
+            [f"sensor returned no {', '.join(missing)}: blind, not healthy"],
+        )
+
     if restarts == 0 and p99 < LATENCY_P99_MS and mem_pct < 80 and disk_pct < 80:
         return Diagnosis(
             FailureMode.HEALTHY,

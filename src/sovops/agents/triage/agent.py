@@ -147,11 +147,18 @@ class TriageAgent:
             )
             return
 
-        if diagnosis.failure_mode is FailureMode.UNKNOWN:
+        if diagnosis.failure_mode in (FailureMode.UNKNOWN, FailureMode.BLIND):
             # Nothing to delegate: there is no diagnosis to act on. An
             # incident that neither the rules nor the model can classify is
             # exactly the one that needs a human, so it pauses in a state a
             # caller can see rather than closing as if it had been handled.
+            #
+            # BLIND lands here without ever reaching the model — see
+            # `is_ambiguous`. A sensor that did not answer is not an
+            # ambiguity to adjudicate, and asking a model to classify an
+            # empty reading returns a confident failure mode built from
+            # nothing.
+            blind = diagnosis.failure_mode is FailureMode.BLIND
             task.status = TaskStatus(
                 TaskState.INPUT_REQUIRED,
                 message=_agent_message(
@@ -160,8 +167,13 @@ class TriageAgent:
                         "source": str(diagnosis.source),
                         "evidence": diagnosis.evidence,
                         "delegated": False,
-                        "awaiting": "human_diagnosis",
+                        "awaiting": "sensor_repair" if blind else "human_diagnosis",
                         "reason": (
+                            "the observability path returned no reading; the service "
+                            "state is unknown and remediation is not attempted blind"
+                        )
+                        if blind
+                        else (
                             "no rule settled this incident and the model could not "
                             "classify it; remediation is not attempted without a diagnosis"
                         ),

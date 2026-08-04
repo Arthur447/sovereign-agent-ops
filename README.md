@@ -136,10 +136,10 @@ better, not poorer** — and `rule_settled_rate` is reported separately in
 every eval run precisely so a future prompt change cannot quietly move
 work back onto the model and call it an improvement.
 
-### Two defects the happy path did not show
+### Three defects the happy path did not show
 
-Both were found by asking what happens *outside* the eight scenarios, and
-both are the kind that a suite written from the design never catches
+All three were found by asking what happens *outside* the scenarios, and
+all three are the kind that a suite written from the design never catches
 because it asserts the design.
 
 **An unclassifiable incident used to close as `COMPLETED`.** When neither
@@ -161,11 +161,38 @@ reads exactly one field out of `signals`. Delegation now projects through
 named to cross. *Least privilege is a property of data, not only of
 rights.*
 
+**A blind agent used to report all-green.** Every threshold in `classify`
+reads a missing field as `0`, so an empty reading satisfied *nothing
+breached* and returned `healthy` — with the audit row for the same run
+recording `get_metrics:read:error: metrics endpoint unreachable`. Three
+different situations arrived as the same dict: a genuinely idle service,
+an endpoint answering `{}`, and a sensor that was down.
+
+The first fix was wrong in an instructive way. Returning `UNKNOWN` sends
+the case to the model, and a 1.7B handed no evidence does not abstain —
+it answered `crash_loop` and the loop restarted a service on it. Trading
+a silent no-op for an action taken on an invention is a worse failure,
+not a better one. So the taxonomy now separates the two unknowns:
+`UNKNOWN` is conflicting evidence, which is a judgement call and the case
+a model is genuinely better at; `BLIND` is *no* evidence, which reaches
+`TASK_STATE_INPUT_REQUIRED` without a model call at all. *Absence of
+evidence is not evidence of health — and it is not an ambiguity to
+adjudicate either.*
+
+A related gap the same check surfaced: `get_metrics` never returns
+`disk_percent` or `p99_latency_ms`, so the disk-pressure and latency
+rules cannot fire on production data — those signals exist only in
+injected scenarios. The gate is still proven (a direct call is refused
+without any agent), but the *incident path* to it is not yet reachable
+from a real sensor. Named here rather than quietly widened, because
+which fields a rule can actually observe is the sort of thing an eval
+suite hides when the harness supplies them.
+
 ---
 
 ## Evaluation
 
-The part that makes this shippable rather than demoable. Eight scenarios
+The part that makes this shippable rather than demoable. Nine scenarios
 in `evals/scenarios/incidents.yaml`, each declaring what a competent
 operator would have done.
 
@@ -290,7 +317,7 @@ Stated because a POC that hides them is worse than one that does not.
 docker compose up -d                        # inference, Jaeger, target estate
 docker exec sovops-ollama ollama pull qwen3:1.7b
 uv sync --extra dev
-uv run pytest -q                            # 46 tests
+uv run pytest -q                            # 53 tests
 uv run python -m sovops.evals.runner        # the eval suite
 ```
 
